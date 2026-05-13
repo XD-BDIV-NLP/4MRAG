@@ -1,6 +1,6 @@
 # MMMRAG: Multimodal Multi-hop Retrieval-Augmented Generation
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub Issues](https://img.shields.io/github/issues/your-username/mmmrag.svg)](https://github.com/your-username/mmmrag/issues)
 [![GitHub Stars](https://img.shields.io/github/stars/your-username/mmmrag.svg)](https://github.com/your-username/mmmrag/stargazers)
