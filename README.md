@@ -67,8 +67,6 @@ mmmrag/
 ├── app.py                         # Main application entry point
 ├── ingestion.py                   # Knowledge base builder
 ├── eval_*.py                      # Evaluation scripts
-├── visualize_results.py           # Result visualization
-├── threshold.py                   # Threshold tuning
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -146,14 +144,6 @@ python eval_vidorag1.py
 
 # SlideVQA dataset
 python eval_slidevqa.py
-
-# MMQA dataset
-python eval_mmmrag_mmqa.py
-```
-
-## 📊 Visualization
-
-python visualize_results.py
 
 ## 📝 License
 
