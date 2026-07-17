@@ -1,4 +1,4 @@
-# MMMRAG: Multimodal Multi-hop Retrieval-Augmented Generation
+# 4MRAG: A Modular Multi-Agent Framework for Adaptive Multimodal Multi-Hop Retrieval
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
