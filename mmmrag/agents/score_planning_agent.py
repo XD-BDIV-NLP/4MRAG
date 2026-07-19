@@ -12,7 +12,7 @@ from ..utils.logger import get_logger
 from ..utils.llm_interface import create_llm_interface
 
 class ScorePlanningAgent:
-    def __init__(self, llm_interface=None, config=None):
+    def __init__(self, llm_interface=None, config=None, unified_retriever=None):
         # ProcessConfig
         if hasattr(config, 'AGENT_LLM_CONFIGS'):  # If it's a Config instance
             self.config_obj = config
@@ -44,6 +44,20 @@ class ScorePlanningAgent:
                 "timeout": self.llm_config["timeout"]
             })
         self.logger.info("ScorePlanningAgent initialized with 2.5 standard interface")
+
+        # Shared retriever instance used for unified confidence scoring. When injected
+        # (app.py passes app.unified_retriever), the planner scores through the exact
+        # same instance the RetrieverAgent uses -- single source of truth, and the one
+        # the threshold eval script monkey-patches. Falls back to a self-built
+        # RetrieverAgent() only when none is injected (standalone usage).
+        self.unified_retriever = unified_retriever
+
+    def _unified_score(self, question: str, has_images: bool, known_information: str) -> float:
+        """Score a question via the shared retriever instance when available."""
+        if self.unified_retriever is not None and hasattr(self.unified_retriever, "_score_question_unified"):
+            return self.unified_retriever._score_question_unified(question, has_images, known_information)
+        from .retriever_agent import RetrieverAgent
+        return RetrieverAgent()._score_question_unified(question, has_images, known_information)
     
     def score_and_plan(self, query: str) -> Dict[str, Any]:
         """
@@ -344,12 +358,20 @@ class ScorePlanningAgent:
                         try:
                             result = json.loads(cleaned_json)
                             
-                            # Extract retrieval_necessity (default to 1 if not present)
-                            retrieval_necessity = result.get("score", {}).get("retrieval_necessity", 1)
-                            
+                            # Unified retrieval scoring: derive retrieval_necessity from a
+                            # continuous confidence score (shared source with RetrieverAgent)
+                            # instead of trusting the model's direct 0/1 guess. This keeps the
+                            # planner and retriever consistent and makes the 0.9 threshold the
+                            # single decision knob (score >= 0.9 -> no retrieval needed).
+                            has_images = len(information.get("images", [])) > 0
+                            confidence_score = self._unified_score(
+                                question, has_images, information.get("text", "")
+                            )
+                            retrieval_necessity = 0 if confidence_score >= 0.9 else 1
+
                             # Apply routing formula: R(Q) = Direct_Gen if Sr=0, else Multi_Agent
                             routing_decision = "Direct_Gen" if retrieval_necessity == 0 else "Multi_Agent"
-                            
+
                             return {
                                 "question": result.get("question", question),
                                 "information": result.get("information", information),
@@ -434,9 +456,7 @@ class ScorePlanningAgent:
             hop_type = self._get_hop_type_from_score(hop_score)
             
             # Calculate retrieval_necessity using unified scoring method
-            from .retriever_agent import RetrieverAgent
-            retriever_agent = RetrieverAgent()
-            score = retriever_agent._score_question_unified(question, has_images, information.get("text", ""))
+            score = self._unified_score(question, has_images, information.get("text", ""))
             # Lower score means higher retrieval necessity
             retrieval_necessity = 1 if score < 0.9 else 0
             
@@ -467,9 +487,7 @@ class ScorePlanningAgent:
             hop_type = self._get_hop_type_from_score(hop_score)
             
             # Calculate retrieval_necessity using unified scoring method
-            from .retriever_agent import RetrieverAgent
-            retriever_agent = RetrieverAgent()
-            score = retriever_agent._score_question_unified(question, has_images, information.get("text", ""))
+            score = self._unified_score(question, has_images, information.get("text", ""))
             # Lower score means higher retrieval necessity
             retrieval_necessity = 1 if score < 0.9 else 0
             

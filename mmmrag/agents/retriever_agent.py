@@ -3,6 +3,7 @@
 
 import base64
 import json
+import os
 import numpy as np
 import time
 import torch
@@ -1922,17 +1923,24 @@ class RetrieverAgent:
         }
         
         # Default retriever configurations
+        # IMPORTANT: read from Config.RETRIEVERS (which eval scripts / --index_path update
+        # BEFORE building the app) so the index_path actually reaches LocalTextRetriever.
+        # The previous version hardcoded os.getenv(...) here and ignored Config.RETRIEVERS,
+        # so passing --index_path had NO effect and retrieval silently used a non-existent
+        # default path -> vector_store empty -> 0 results -> answer fuser hallucinated.
+        _lt_params = Config.RETRIEVERS.get("local_text", {}).get("params", {})
+        _cm_params = Config.RETRIEVERS.get("cross_modal", {}).get("params", {})
         self.default_configs = {
             "local_text": {
-                "model_path": Config.LOCAL_MODEL_PATHS.get("bge_m3", os.path.join(Config.PROJECT_ROOT, 'models', 'bge_m3')),
-                "index_path": os.getenv("MMMRAG_TEXT_INDEX_PATH", os.path.join(Config.PROJECT_ROOT, 'data', 'ViDoSeek', 'bge_ingestion')),
-                "top_k": 10
+                "model_path": _lt_params.get("model_path", Config.LOCAL_MODEL_PATHS.get("bge_m3", os.path.join(Config.PROJECT_ROOT, 'models', 'bge_m3'))),
+                "index_path": _lt_params.get("index_path", os.getenv("MMMRAG_TEXT_INDEX_PATH", os.path.join(Config.PROJECT_ROOT, 'data', 'ViDoSeek', 'bge_ingestion'))),
+                "top_k": _lt_params.get("top_k", 10),
             },
             "cross_modal": {
-                "model_path": Config.LOCAL_MODEL_PATHS.get("bge_vl_base", os.path.join(Config.PROJECT_ROOT, 'models', 'BGE-VL-Base')),
-                "index_path": os.getenv("MMMRAG_CROSS_MODAL_INDEX_PATH", os.path.join(Config.PROJECT_ROOT, 'data', 'ViDoSeek', 'bgevlbase_ingestion')),
-                "top_k": 10
-            }
+                "model_path": _cm_params.get("model_path", Config.LOCAL_MODEL_PATHS.get("bge_vl_base", os.path.join(Config.PROJECT_ROOT, 'models', 'BGE-VL-Base'))),
+                "index_path": _cm_params.get("index_path", os.getenv("MMMRAG_CROSS_MODAL_INDEX_PATH", os.path.join(Config.PROJECT_ROOT, 'data', 'ViDoSeek', 'bgevlbase_ingestion'))),
+                "top_k": _cm_params.get("top_k", 10),
+            },
         }
         
         self.default_reranker_configs = {
@@ -1961,47 +1969,78 @@ class RetrieverAgent:
         Returns:
             Score between 0-1 indicating retrieval complexity and necessity
         """
-        # Create scoring prompt with aligned criteria
-        scoring_prompt = f"""
-        Estimate the probability that the model can answer the question correctly WITHOUT retrieval.
-        
-        Definition:
-        - 1.0 → almost certain (>95% chance correct)
-        - 0.8 → high confidence (likely correct, minor risk)
-        - 0.5 → uncertain (roughly 50/50)
-        - 0.2 → low confidence (likely incorrect)
-        - 0.0 → almost impossible
-        
-        Question: {question}
-        
-        Return ONLY a number between 0.0 and 1.0.
-        """
-        
+        # Concise, semantically-anchored confidence scoring prompt (reason-then-score).
+        # The model first reasons in 1-2 sentences, then emits a final "Score: <number>" line
+        # which the code parses. Continuous score + 0.9 threshold (see _decide_retrieval_strategy)
+        # is the single decision knob for whether retrieval is needed.
+        scoring_prompt = (
+            "Estimate the probability (0.0-1.0) that a language model can answer the "
+            "question correctly using only its internal knowledge, without external retrieval.\n\n"
+            "Scoring anchors:\n"
+            "- 1.0: Universal, timeless facts (>95% correct)\n"
+            "- 0.8: High confidence, minor detail risk\n"
+            "- 0.5: Uncertain, roughly 50/50\n"
+            "- 0.2: Likely incorrect or outdated\n"
+            "- 0.0: Requires external knowledge or post-2025 facts\n\n"
+            "Consider: temporal sensitivity, factual granularity, verification need, and "
+            "hallucination risk for seemingly familiar topics.\n\n"
+            "Output reasoning in 1-2 sentences, then a final line:\n"
+            "Score: <number>\n\n"
+            f"Question: {question}"
+        )
+
         try:
-            # Call LLM for scoring
+            # Call LLM for scoring. enable_thinking=False keeps Qwen3-VL from spending
+            # its token budget on a <think> block, which previously truncated the
+            # "Score:" line before it was emitted and forced every score to fall back to 0.0.
             response = self.llm_interface.generate(
                 scoring_prompt,
-                system_prompt="You are a specialized Score Planning Agent that provides precise scores.",
+                system_prompt="You are a confidence scoring agent. Always end with a line 'Score: <number>'.",
                 temperature=0.1,
-                max_tokens=50
+                max_tokens=300,
+                enable_thinking=False,
             )
-            
-            # Parse scoring result
-            score_text = response.get("text", "0.0").strip()
-            # Extract number
-            import re
-            score_match = re.search(r"\d+\.\d+", score_text)
-            if score_match:
-                score = float(score_match.group())
-                # Ensure score is between 0-1
-                return max(0.0, min(1.0, score))
-            else:
-                # Parse failed, return default value
+
+            score_text = response.get("text", "").strip()
+            score = self._parse_confidence_score(score_text)
+            if score is None:
+                # Parse failed, default to 0.0 (conservative: assume retrieval needed)
+                self.logger.warning("Could not parse 'Score:' from LLM response; defaulting to 0.0")
                 return 0.0
+            return score
         except Exception as e:
             self.logger.warning(f"Failed to score question: {e}")
             # Return default value in exception case
             return 0.0
+
+    @staticmethod
+    def _parse_confidence_score(text: str) -> Optional[float]:
+        """Parse a 0-1 confidence score from model output.
+
+        Defensive against Qwen3-VL quirks:
+        - <think>...</think> or  ...  reasoning blocks
+        - markdown bold markers like **Score:** 0.9
+        - 'Score:0.9' (no space) as well as 'Score: 0.9'
+        - trailing punctuation / prose after the number
+
+        Returns float clamped to [0,1], or None when no score is found.
+        """
+        if not text:
+            return None
+        import re
+        # strip reasoning blocks first so they can't inject a stray 'Score:'
+        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        cleaned = re.sub(r"", "", cleaned, flags=re.DOTALL)
+        cleaned = cleaned.replace("**", "")
+        # Take the LAST 'Score:' occurrence -> the model's final answer line.
+        matches = re.findall(r"Score:\s*(\d+(?:\.\d+)?)", cleaned, re.IGNORECASE)
+        if not matches:
+            return None
+        try:
+            score = float(matches[-1])
+        except ValueError:
+            return None
+        return max(0.0, min(1.0, score))
 
     def process_query(self, query_data: Dict[str, Any], retrieval_top_k: int = 10, rerank_top_k: int = 5) -> Dict[str, Any]:
         """
@@ -2074,8 +2113,16 @@ class RetrieverAgent:
             
             # Use LLM to decide retrieval strategy instead of hardcoded logic
             retrieval_strategy = self._decide_retrieval_strategy(question, information_text, has_images, question_score)
-            
-            if retrieval_strategy["need_retrieval"] is False:
+
+            # Retrieval gating is DISABLED by default: the confidence score used to be
+            # constantly 0.0 (Qwen3-VL thinking truncated the "Score:" line), so this gate
+            # was dormant and EVERY question was retrieved -- which is the correct behavior
+            # for document QA datasets like ViDoSeek (every question needs retrieval).
+            # Now that _score_question_unified returns real scores, the gate would skip
+            # retrieval for high-confidence questions and starve the answer fuser of context,
+            # collapsing EM. Keep the score (logged/returned for analysis) but ALWAYS retrieve
+            # unless a caller explicitly opts in via _enable_retrieval_gating=True.
+            if retrieval_strategy["need_retrieval"] is False and getattr(self, "_enable_retrieval_gating", False):
                 # Return direct answer result without retrieval
                 response = {
                     "question": question,
