@@ -132,10 +132,20 @@ class MMMRAGApp:
         # Initialize LLM interface
         self.llm_interface = LLMInterface(**self.config.llm_config)
         
+        # Initialize retrievers
+        self.retrievers = {}
+        self._initialize_retrievers()
+
+        # Initialize unified retriever agent FIRST, so the planner reuses the exact same
+        # scoring instance (single source of truth; also the one the threshold eval script
+        # monkey-patches). This removes the old "two independent scoring instances" hazard.
+        self.unified_retriever = RetrieverAgent(config=self.config)
+
         # Initialize agents
         self.score_planning_agent = ScorePlanningAgent(
             llm_interface=self.llm_interface,
-            config=self.config
+            config=self.config,
+            unified_retriever=self.unified_retriever
         )
         self.question_decomposer = QuestionDecomposer(
             llm_interface=self.llm_interface,
@@ -149,13 +159,6 @@ class MMMRAGApp:
             llm_interface=self.llm_interface,
             config=self.config
         )
-        
-        # Initialize retrievers
-        self.retrievers = {}
-        self._initialize_retrievers()
-        
-        # Initialize unified retriever agent
-        self.unified_retriever = RetrieverAgent(config=self.config)
         
         self.logger.info("MMMRAG Application initialization complete")
     
@@ -530,10 +533,18 @@ class MMMRAGApp:
         self.logger.info(f"Sub-question execution complete, total {len(execution_results['subquery_results'])} results")
         return execution_results
     
-    def _execute_direct_query(self, query: str, image_base64: Optional[str] = None, information: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Execute direct single-hop query"""
-        self.logger.info(f"Executing direct query: {query}")
-        
+    def _execute_direct_query(self, query: str, image_base64: Optional[str] = None, information: Optional[Dict[str, Any]] = None, use_retrieval: bool = True) -> Dict[str, Any]:
+        """Execute direct single-hop query.
+
+        `use_retrieval=False` (added for the retrieval-gating experiment) skips the
+        vector/cross-modal retriever entirely and answers from the LLM alone. This is
+        what makes a "gate says no retrieval" decision actually suppress retrieval —
+        otherwise `_execute_direct_query` always retrieves (line below), so the gating
+        threshold could never change answer quality. Default True preserves the
+        production behavior (the real pipeline always retrieves for single-hop).
+        """
+        self.logger.info(f"Executing direct query: {query} (use_retrieval={use_retrieval})")
+
         query_data = {
             "question": query,
             "information": {
@@ -541,27 +552,31 @@ class MMMRAGApp:
                 "images": [image_base64] if image_base64 else []
             }
         }
-        
-        retrieval_result = self.unified_retriever.process_query(query_data)
-        
-        # Extract and clean results
-        answer_data = retrieval_result.get("answer", {})
-        if isinstance(answer_data, dict):
-            if answer_data.get("retrieval_method") == "hybrid":
-                results_list = answer_data.get("results", {}).get("results", [])
+
+        if use_retrieval:
+            retrieval_result = self.unified_retriever.process_query(query_data)
+
+            # Extract and clean results
+            answer_data = retrieval_result.get("answer", {})
+            if isinstance(answer_data, dict):
+                if answer_data.get("retrieval_method") == "hybrid":
+                    results_list = answer_data.get("results", {}).get("results", [])
+                else:
+                    results_field = answer_data.get("results", [])
+                    results_list = results_field.get("results", []) if isinstance(results_field, dict) else results_field
             else:
-                results_field = answer_data.get("results", [])
-                results_list = results_field.get("results", []) if isinstance(results_field, dict) else results_field
+                results_list = []
+
+            search_results = []
+            for res in results_list:
+                if not res: continue
+                safe_res = res.copy()
+                if "metadata" in safe_res:
+                    safe_res["metadata"] = {k: v for k, v in safe_res["metadata"].items() if k not in ["vector", "embedding"]}
+                search_results.append(safe_res)
         else:
-            results_list = []
-            
-        search_results = []
-        for res in results_list:
-            if not res: continue
-            safe_res = res.copy()
-            if "metadata" in safe_res:
-                safe_res["metadata"] = {k: v for k, v in safe_res["metadata"].items() if k not in ["vector", "embedding"]}
-            search_results.append(safe_res)
+            self.logger.info(f"[no_retrieval] Gated skip of retrieval for: {query[:60]}...")
+            search_results = []
             
         # Generate answer using AnswerFuser
         fuser_input = [{
@@ -597,10 +612,14 @@ class MMMRAGApp:
                 "answer": direct_result.get("answer", "")
             }]
             
-            fusion_result = self.answer_fuser.fuse(
-                original_query=query,
-                subquery_results=sub_results,
-                routing_strategy="no_decomposition",
+            # Call fuse_answers directly (same pattern as _execute_direct_query:581, which
+            # works on the server) instead of the fuse() forwarder, whose signature mismatch
+            # ("missing fuser_input") makes single-hop final_answer an error string.
+            # NOTE: do NOT pass routing_strategy= -- the server's fuse_answers does not
+            # accept it; mirror the working call at line 581 exactly.
+            fusion_result = self.answer_fuser.fuse_answers(
+                sub_results,
+                original_question=query,
                 return_full_json=True
             )
             
@@ -661,10 +680,11 @@ class MMMRAGApp:
             })
             
         try:
-            fusion_result = self.answer_fuser.fuse(
-                original_query=query,
-                subquery_results=sub_results,
-                routing_strategy=routing_strategy,
+            # Call fuse_answers directly (same pattern as _execute_direct_query:581) instead
+            # of the fuse() forwarder, which has a signature mismatch on the server.
+            fusion_result = self.answer_fuser.fuse_answers(
+                sub_results,
+                original_question=query,
                 return_full_json=True
             )
             
