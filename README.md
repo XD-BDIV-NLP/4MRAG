@@ -7,12 +7,6 @@ Official implementation of the paper **"4MRAG: A Modular Multi-Agent Framework f
 
 > **Naming note.** The framework is called **4MRAG** in the paper and **MMMRAG** in the codebase (Python package name and environment-variable prefixes). Both names refer to exactly the same system.
 
-During anonymous review this repository is served through Anonymous GitHub:
-
-```
-https://anonymous.4open.science/r/4MRAG-3AC3/
-```
-
 ---
 
 ## Overview
@@ -79,7 +73,7 @@ The pinned environment is provided in `requirements.txt` (key versions: `torch==
 
 ## Installation
 
-Download the snapshot of this anonymous repository (use the **Download** button on the repository page) and extract it locally. Working from a downloaded copy also keeps the review fully anonymous.
+Download the snapshot of this repository (use the **Download** button on the repository page) and extract it locally, then install the dependencies.
 
 ```bash
 # extract the downloaded archive, then:
@@ -168,4 +162,4 @@ This project is released under the MIT License. See `LICENSE` for details.
 
 ## Questions
 
-During anonymous review, please raise any questions through the journal's review system so that anonymity is preserved.
+For questions about the code, please raise them through the journal's review system during review, or contact the authors afterwards.
