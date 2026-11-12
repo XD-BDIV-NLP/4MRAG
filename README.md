@@ -1,118 +1,140 @@
-# 4MRAG: A Modular Multi-Agent Framework for Adaptive Multimodal Multi-Hop Retrieval
+# 4MRAG: A Modular Multi-Agent Framework for Adaptive Multimodal Multi-Hop Retrieval-Augmented Generation
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub Issues](https://img.shields.io/github/issues/your-username/mmmrag.svg)](https://github.com/your-username/mmmrag/issues)
-[![GitHub Stars](https://img.shields.io/github/stars/your-username/mmmrag.svg)](https://github.com/your-username/mmmrag/stargazers)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-MMMRAG is an advanced **multimodal multi-hop retrieval-augmented generation (RAG)** framework that leverages agent collaboration to efficiently handle complex queries involving multiple modalities and multi-step reasoning.
+Official implementation of the paper **"4MRAG: A Modular Multi-Agent Framework for Adaptive Multimodal Multi-Hop Retrieval-Augmented Generation"**, submitted to *Expert Systems With Applications*.
 
-This work is described in our research paper submitted to **Information Fusion** journal:
+> **Naming note.** The framework is called **4MRAG** in the paper and **MMMRAG** in the codebase (Python package name and environment-variable prefixes). Both names refer to exactly the same system.
 
-> **4MRAG: A Modular Multi-Agent Framework for Adaptive Multimodal Multi-Hop Retrieval**
-
-## 🚀 Overview
-
-Built on cutting-edge multimodal models, MMMRAG provides a robust architecture for:
-- **Multimodal Understanding**: Process text, images, and other modalities simultaneously
-- **Multi-hop Reasoning**: Tackle complex questions requiring multiple reasoning steps
-- **Intelligent Routing**: Automatically select optimal processing strategies based on query complexity
-- **Hot-pluggable Components**: Easily integrate and swap different retrievers and models
-
-### 📝 Naming Convention Note
-
-While this framework is referred to as **4MRAG** in academic publications and papers, the codebase uses **MMMRAG** as the project name. This naming difference stems from architectural considerations and consistency with the codebase naming conventions. Both names refer to the same system - a **Multimodal Multi-hop Retrieval-Augmented Generation** framework. The core functionality and architecture remain identical regardless of the naming convention used.
-
-## 🧠 Core Components
-
-| Component | Description |
-|-----------|-------------|
-| **Scoring-based Planning Agent (SPA)** | Dynamically formulates processing pipelines via a three-dimensional scoring mechanism and adaptive routing |
-| **Question Decomposer Agent (QDA)** | Implements a logic-aware decomposition strategy where questions are categorized as bridging, parallel comparison, etc. |
-| **Sub-question Reviewer Agent (SRA)** | Verifies the validity, completeness, and logical consistency of decomposed sub-tasks |
-| **Plug-and-play Retrieval Agent (PRA)** | Supports on-demand invocation of composite-modality retrieval modules |
-| **Answer Fusion Agent (AFA)** | Integrates intermediate results to generate coherent final answers |
-
-## ✨ Key Features
-
-- **Intelligent Routing Strategy**: Automatically selects optimal processing path (simple / parallel / bridging)
-- **Multimodal Support**: Handles text, images for input and retrieval
-- **Multi-hop Reasoning**: Supports complex multi-step reasoning questions
-- **Hot-pluggable Retrievers**: Easy integration of different retrieval implementations
-- **Flexible Configuration**: All paths and parameters configurable via environment variables
-- **Comprehensive Logging**: Detailed logging for debugging and monitoring
-
-## 📁 Directory Structure
+During anonymous review this repository is served through Anonymous GitHub:
 
 ```
-mmmrag/
-├── mmmrag/                        # Core package
-│   ├── agents/                    # Agent modules
-│   │   ├── score_planning_agent.py    # SPA: Scoring-based Planning Agent
-│   │   ├── question_decomposer.py     # QDA: Question Decomposer Agent
-│   │   ├── subquery_reviewer.py       # SRA: Sub-question Reviewer Agent
-│   │   ├── answer_fuser.py            # AFA: Answer Fusion Agent
-│   │   └── retriever_agent.py         # PRA: Plug-and-play Retrieval Agent
-│   ├── config/                    # Configuration
-│   │   ├── config.py              # Main config
-│   │   └── api_keys_config.py     # API key management
-│   ├── utils/                     # Utilities
-│   │   ├── llm_interface.py       # LLM provider abstraction
-│   │   ├── llm_utils.py
-│   │   ├── model_manager.py       # Multi-model routing
-│   │   ├── device_manager.py
-│   │   ├── text_processor.py
-│   │   └── logger.py
-│   └── __init__.py
-├── app.py                         # Main application entry point
-├── ingestion.py                   # Knowledge base builder
-├── eval_*.py                      # Evaluation scripts
-├── requirements.txt
-├── .gitignore
+https://anonymous.4open.science/r/4MRAG-3AC3/
+```
+
+---
+
+## Overview
+
+4MRAG is a multimodal multi-hop Retrieval-Augmented Generation (RAG) framework built around five collaborating LLM agents. It supports:
+
+- **Adaptive routing** — question complexity is scored along three dimensions (modality complexity, multi-hop complexity, retrieval necessity) and the pipeline is planned accordingly;
+- **Dual-mode decomposition** — questions are decomposed in a bridging or parallel-comparison style, with a reviewer agent validating each sub-question and sending invalid ones back for re-decomposition;
+- **Plug-and-play retrieval** — retrievers over different modalities are invoked on demand through a uniform interface;
+- **Confidence-based retrieval gating** — a verbalized confidence score decides whether external retrieval is needed at all;
+- **Multimodal inputs** — text and images, with hot-swappable retrieval backends.
+
+## Core Components (Paper to Code)
+
+| Component (paper) | Role | Implementation |
+|---|---|---|
+| Scoring-based Planning Agent (SPA) | Three-dimensional scoring and adaptive routing | `mmmrag/agents/score_planning_agent.py` |
+| Question Decomposer Agent (QDA) | Logic-aware decomposition (bridging / parallel) | `mmmrag/agents/question_decomposer.py` |
+| Sub-question Reviewer Agent (SRA) | Validity, completeness and consistency checking | `mmmrag/agents/subquery_reviewer.py` |
+| Plug-and-play Retrieval Agent (PRA) | On-demand multimodal retrieval | `mmmrag/agents/retriever_agent.py` |
+| Answer Fusion Agent (AFA) | Evidence fusion and final answer generation | `mmmrag/agents/answer_fuser.py` |
+
+## Repository Layout
+
+```
+.
+├── mmmrag/                          # Core Python package
+│   ├── agents/                      # The five collaborating agents
+│   │   ├── score_planning_agent.py      # SPA: scoring + adaptive routing
+│   │   ├── question_decomposer.py       # QDA: bridging / parallel decomposition
+│   │   ├── subquery_reviewer.py         # SRA: sub-question validation
+│   │   ├── retriever_agent.py           # PRA: plug-and-play retrieval
+│   │   └── answer_fuser.py              # AFA: answer fusion
+│   ├── config/
+│   │   ├── config.py                    # Model paths, thresholds, per-agent LLM configs
+│   │   └── api_keys_config.py           # API key management
+│   └── utils/
+│       ├── llm_interface.py             # LLM provider abstraction
+│       ├── llm_utils.py
+│       ├── model_manager.py             # Multi-model routing
+│       ├── device_manager.py
+│       ├── text_processor.py
+│       └── logger.py
+├── app.py                           # Entry point (interactive CLI / single query)
+├── ingestion.py                     # Knowledge-base builder (FAISS index)
+├── eval_vidorag1.py                 # Evaluation on ViDoSeek
+├── eval_slidevqa.py                 # Evaluation on SlideVQA
+├── qwen3vl.sh                       # Example vLLM startup script (Qwen3-VL-8B-Instruct)
+├── requirements.txt                 # Pinned, tested environment
+├── LICENSE
 └── README.md
 ```
 
-## 🛠️ Installation
+## Requirements
 
-### Requirements
 - Python 3.10+
-- CUDA-capable GPU (recommended)
-- Local LLM service (e.g., vLLM serving Qwen3-VL-8B-Instruct and Qwen3-8B, see `eval/qwen3vl.sh` for startup script)
+- A CUDA-capable GPU (an NVIDIA GPU is strongly recommended for the local retrieval stack)
+- A local LLM service. We use **vLLM** to serve two backbones:
+  - `Qwen3-VL-8B-Instruct` (multimodal reasoning), and
+  - `Qwen3-8B` (text-only utilities).
+  See `qwen3vl.sh` at the repository root for an example startup script.
 
-### Steps
+The pinned environment is provided in `requirements.txt` (key versions: `torch==2.9.0+cu128`, `vllm==0.13.0`, `transformers==4.57.1`, `faiss-cpu==1.13.0`, `sentence-transformers==5.1.2`, `colpali_engine`).
+
+## Installation
+
+Download the snapshot of this anonymous repository (use the **Download** button on the repository page) and extract it locally. Working from a downloaded copy also keeps the review fully anonymous.
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/mmmrag.git
-cd mmmrag
-
-# Install dependencies
+# extract the downloaded archive, then:
+cd 4MRAG-3AC3
 pip install -r requirements.txt
+```
 
-# Configure environment variables (create .env file)
-cat > .env << EOF
+## Configuration
+
+All paths and endpoints are configured through environment variables (e.g., via a `.env` file or exported in your shell):
+
+| Variable | Description |
+|---|---|
+| `MMMRAG_MODEL_DIR` | Base directory of all local models |
+| `MMMRAG_DATA_DIR` | Base directory of datasets and indexes |
+| `LOCAL_QWEN3VL_API_URL` | OpenAI-compatible endpoint of the multimodal LLM |
+| `LOCAL_QWEN_TEXT_API_URL` | OpenAI-compatible endpoint of the text-only LLM |
+| `MMMRAG_GPU_DEVICES` | Visible GPU devices (e.g., `0,1`) |
+
+Example:
+
+```bash
+cat > .env << 'EOF'
 MMMRAG_MODEL_DIR=/path/to/your/models
 MMMRAG_DATA_DIR=/path/to/your/data
 LOCAL_QWEN3VL_API_URL=http://localhost:8888
+LOCAL_QWEN_TEXT_API_URL=http://localhost:8889
+MMMRAG_GPU_DEVICES=0,1
 EOF
+```
 
-# Prepare models and build knowledge base
+## Building the Knowledge Base
+
+```bash
 python ingestion.py
 ```
 
-## 🚀 Usage
+This parses the corpus under `MMMRAG_DATA_DIR`, computes text and visual embeddings, and builds the FAISS indexes used by the retrieval agent.
 
-### Interactive CLI Mode
+## Usage
+
+Interactive CLI:
+
 ```bash
 python app.py
 ```
 
-### Single Query Mode
+Single query (text + image):
+
 ```bash
-python app.py --query "Describe this image" --image /path/to/image.jpg
+python app.py --query "Describe the trend shown in this figure" --image /path/to/image.jpg
 ```
 
-### Programmatic Usage
+Programmatic use:
+
 ```python
 from mmmrag import MMMRAGApp
 
@@ -124,35 +146,26 @@ result = app.process_query({
 print(result["answer"])
 ```
 
-## ⚙️ Configuration
-
-All configuration is managed through environment variables:
-
-| Variable | Description |
-|----------|-------------|
-| `MMMRAG_MODEL_DIR` | Base directory for all models |
-| `MMMRAG_DATA_DIR` | Base directory for data and indexes |
-| `LOCAL_QWEN3VL_API_URL` | Multimodal LLM API URL |
-| `LOCAL_QWEN_TEXT_API_URL` | Text-only LLM API URL |
-| `MMMRAG_GPU_DEVICES` | Available GPU devices |
-
-## 🧪 Evaluation
+## Evaluation
 
 ```bash
-# ViDoSeek dataset
+# ViDoSeek
 python eval_vidorag1.py
 
-# SlideVQA dataset
+# SlideVQA
 python eval_slidevqa.py
+```
 
-## 📝 License
+**Settings used in the paper:** per-modality candidate pool `k = 5`, cross-encoder reranking down to the final evidence set `N = 3`, and random seed `42`. The reported accuracy is the Acc* metric described in the paper.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Datasets
 
-## 🤝 Contributing
+Experiments are conducted on public benchmarks (**ViDoSeek** and **SlideVQA**). Please obtain each dataset from its official source and place it under `MMMRAG_DATA_DIR` following the layout expected by the evaluation scripts. Datasets are **not** redistributed in this repository, in accordance with their licenses.
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+## License
 
-## 📧 Contact
+This project is released under the MIT License. See `LICENSE` for details.
 
-For questions or support, please open an issue on GitHub.
+## Questions
+
+During anonymous review, please raise any questions through the journal's review system so that anonymity is preserved.
